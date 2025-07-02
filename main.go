@@ -45,7 +45,7 @@ var (
 func init() {
 	var err error
 	//connect gRpc server
-	conn, err = grpc.NewClient("118.175.0.230:19090", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err = grpc.NewClient("192.168.0.84:19090", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		panic(err)
 	}
@@ -62,7 +62,7 @@ func main() {
 	}
 }
 func decodeTx() {
-	// 读取 JSON 文件
+	// read the JSON file
 	data, err := os.ReadFile("./tx.json")
 	if err != nil {
 		panic(err)
@@ -72,12 +72,12 @@ func decodeTx() {
 		BodyBytes     string   `json:"body_bytes"`
 		Signatures    []string `json:"signatures"`
 	}
-	// 解析 JSON
+	// analyze the JSON structure
 	var tx TxJson
 	if err = json.Unmarshal(data, &tx); err != nil {
 		panic(err)
 	}
-	// 解析 body_bytes
+	// analyze the transaction
 	bodyBytes, _ := base64.StdEncoding.DecodeString(tx.BodyBytes)
 	var body sdkTx.TxBody
 	if err := proto.Unmarshal(bodyBytes, &body); err != nil {
@@ -95,7 +95,7 @@ func decodeTx() {
 		}
 	}
 
-	// 解析 auth_info_bytes
+	// analyze auth_info_bytes
 	authInfoBytes, _ := base64.StdEncoding.DecodeString(tx.AuthInfoBytes)
 	var authInfo sdkTx.AuthInfo
 	if err := proto.Unmarshal(authInfoBytes, &authInfo); err != nil {
@@ -103,23 +103,23 @@ func decodeTx() {
 	}
 	fmt.Printf("AuthInfo: %+v\n", authInfo)
 
-	// 解析签名
+	// analyze the signatures
 	sigs := make([][]byte, len(tx.Signatures))
 	for i, s := range tx.Signatures {
 		sigs[i], _ = base64.StdEncoding.DecodeString(s)
 		fmt.Printf("Signature %d: %x\n", i, sigs[i])
 	}
-	// 组装 Tx 结构体
+	// create a new transaction
 	tx2 := &sdkTx.Tx{
 		AuthInfo:   &authInfo,
 		Body:       &body,
 		Signatures: sigs,
 	}
 	CallGRPCSimulate(tx2)
-	// protobuf 序列化
+	// protobuf serialize the transaction
 	txBytes, _ := proto.Marshal(tx2)
 	fmt.Println("txBytes base64:", base64.StdEncoding.EncodeToString(txBytes))
-	// 计算 hash
+	// calculate hash
 	hash := sha256.Sum256(txBytes)
 	fmt.Println("Tx Hash:", strings.ToUpper(hex.EncodeToString(hash[:])))
 }
@@ -166,16 +166,15 @@ func decodeTx2() {
 				fmt.Printf("Unknown msg type: %s\n", anyMsg.TypeUrl)
 			}
 		}
-		// 解析 AuthInfo 中的公钥
+		// analyze public keys for each signer
 		for i, signerInfo := range tx.AuthInfo.SignerInfos {
 			fmt.Printf("Signer %d:\n", i)
 			fmt.Printf("  Public Key Type: %s\n", signerInfo.PublicKey.TypeUrl)
 
-			// 解析公钥的 value 字段
+			// analyze the public key
 			if signerInfo.PublicKey.TypeUrl == "/cosmos.crypto.secp256k1.PubKey" {
-				// 公钥的 value 是 protobuf 编码的，需要跳过前2个字节（protobuf 标识符）
 				if len(signerInfo.PublicKey.Value) >= 35 {
-					pubKeyBytes := signerInfo.PublicKey.Value[2:] // 跳过前2个字节
+					pubKeyBytes := signerInfo.PublicKey.Value[2:] // Skip the first two bytes (0x02 or 0x03)
 					fmt.Printf("  Public Key (hex): %x\n", pubKeyBytes)
 					pubKeyBase64 := base64.StdEncoding.EncodeToString(pubKeyBytes)
 					fmt.Printf("公钥（Base64）: %s\n", pubKeyBase64)
@@ -233,33 +232,33 @@ func GenerateKeyAndAddress(isCreate bool) (privKey *secp256k1.PrivKey, pubKey *s
 	return privKey, pubKey, address
 }
 func MakeSendTx() {
-	//create private key
+	//1.create private key
 	privKey, pubKey, address := GenerateKeyAndAddress(false)
-	// Create a MsgSend message
+	//2. Create a MsgSend message
 	msgSend := &types.MsgSend{
 		FromAddress: address,
 		ToAddress:   address,
 		Amount:      sdk.NewCoins(sdk.NewCoin("umec", math.NewInt(100))),
 	}
-	// Create an Any type to hold the MsgSend message
+	//3. Create an Any type to hold the MsgSend message
 	msgSendAny, err := codectypes.NewAnyWithValue(msgSend)
 	if err != nil {
 		fmt.Println("Error creating Any with MsgSend:", err)
 		return
 	}
-	// Create a TxBody with the MsgSend message
+	//4. Create a TxBody with the MsgSend message
 	txBody := &sdkTx.TxBody{
 		Messages:      []*codectypes.Any{msgSendAny},
 		Memo:          "Test transaction",
 		TimeoutHeight: 0,
 	}
-	// Create an Any type to hold the public key
+	//5. Create an Any type to hold the public key
 	pubKeyAny, err := codectypes.NewAnyWithValue(pubKey)
 	if err != nil {
 		fmt.Println("Error creating Any with PubKey:", err)
 		return
 	}
-	//create signer info
+	//6.create signer info
 	signerInfo := &sdkTx.SignerInfo{
 		PublicKey: pubKeyAny,
 		ModeInfo: &sdkTx.ModeInfo{
@@ -271,31 +270,31 @@ func MakeSendTx() {
 		},
 		Sequence: 1,
 	}
-	//create fee
+	//7. create fee
 	fee := &sdkTx.Fee{
 		Amount:   sdk.NewCoins(sdk.NewCoin("umec", math.NewInt(3058))),
 		GasLimit: 100000,
 	}
-	//create auth info
+	//8.create auth info
 	authInfo := &sdkTx.AuthInfo{
 		SignerInfos: []*sdkTx.SignerInfo{signerInfo},
 		Fee:         fee,
 	}
 	// ======create sign(if simulate, no need to sign)=======
 
-	// serialize txBody
+	//9. serialize txBody
 	bodyBytes, err := proto.Marshal(txBody)
 	if err != nil {
 		fmt.Println("Error marshalling txBody:", err)
 		return
 	}
-	//serialize authInfo
+	//10.serialize authInfo
 	authInfoBytes, err := proto.Marshal(authInfo)
 	if err != nil {
 		fmt.Println("Error marshalling authInfo:", err)
 		return
 	}
-	// Create a SignDoc for signing
+	//11. Create a SignDoc for signing
 	signDoc := &sdkTx.SignDoc{
 		BodyBytes:     bodyBytes,
 		AuthInfoBytes: authInfoBytes,
@@ -313,7 +312,7 @@ func MakeSendTx() {
 		return
 	}
 
-	//create transaction
+	//12.create transaction
 	tx := &sdkTx.Tx{
 		Body:       txBody,
 		AuthInfo:   authInfo,
@@ -326,17 +325,16 @@ func MakeSendTx() {
 	}
 	fmt.Println("Transaction Bytes (Base64):", base64.StdEncoding.EncodeToString(txBytes))
 
-	// 11. 调用 gRPC 预估 gas
+	// 13. simulate the transaction using gRPC
 	CallGRPCSimulate(tx)
 
-	// 12. 计算交易哈希
+	// 14. calculate the transaction hash
 	hash := sha256.Sum256(txBytes)
 	fmt.Printf("交易哈希: %s\n", strings.ToUpper(hex.EncodeToString(hash[:])))
-
-	// 发送交易到网络
+	//15. broadcast the transaction
 	broadcastResp, err := client.BroadcastTx(context.Background(), &sdkTx.BroadcastTxRequest{
 		TxBytes: txBytes,
-		Mode:    sdkTx.BroadcastMode_BROADCAST_MODE_SYNC, // 或使用 BROADCAST_MODE_ASYNC, BROADCAST_MODE_BLOCK
+		Mode:    sdkTx.BroadcastMode_BROADCAST_MODE_SYNC, // or use BROADCAST_MODE_ASYNC, BROADCAST_MODE_BLOCK
 	})
 	if err != nil {
 		fmt.Println("Broadcast error:", err)
