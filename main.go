@@ -21,6 +21,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkTx "github.com/cosmos/cosmos-sdk/types/tx" // Import the tx package for transaction types
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
+	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/gogoproto/proto"
 )
@@ -231,6 +232,23 @@ func GenerateKeyAndAddress(isCreate bool) (privKey *secp256k1.PrivKey, pubKey *s
 	fmt.Printf("address: %s\n", address)
 	return privKey, pubKey, address
 }
+func getAccountInfo(address string) (accountNumber uint64, sequence uint64, err error) {
+	authClient := authTypes.NewQueryClient(conn)
+	resp, err := authClient.Account(context.Background(), &authTypes.QueryAccountRequest{
+		Address: address,
+	})
+	if err != nil {
+		fmt.Println("Error getting account info:", err)
+		return
+	}
+	var baseAccount authTypes.BaseAccount
+	err = proto.Unmarshal(resp.Account.Value, &baseAccount)
+	if err != nil {
+		fmt.Println("Error unmarshalling BaseAccount:", err)
+		return 0, 0, err
+	}
+	return baseAccount.AccountNumber, baseAccount.Sequence, nil
+}
 func MakeSendTx() {
 	//1.create private key
 	privKey, pubKey, address := GenerateKeyAndAddress(false)
@@ -239,6 +257,11 @@ func MakeSendTx() {
 		FromAddress: address,
 		ToAddress:   address,
 		Amount:      sdk.NewCoins(sdk.NewCoin("umec", math.NewInt(100))),
+	}
+	accountNumber, sequence, err := getAccountInfo(address)
+	if err != nil {
+		fmt.Println("Error getting account info:", err)
+		return
 	}
 	//3. Create an Any type to hold the MsgSend message
 	msgSendAny, err := codectypes.NewAnyWithValue(msgSend)
@@ -268,7 +291,7 @@ func MakeSendTx() {
 				},
 			},
 		},
-		Sequence: 1,
+		Sequence: sequence,
 	}
 	//7. create fee
 	fee := &sdkTx.Fee{
@@ -299,7 +322,7 @@ func MakeSendTx() {
 		BodyBytes:     bodyBytes,
 		AuthInfoBytes: authInfoBytes,
 		ChainId:       "me-chain",
-		AccountNumber: 1370046,
+		AccountNumber: accountNumber,
 	}
 	signBytes, err := proto.Marshal(signDoc)
 	if err != nil {
@@ -340,8 +363,6 @@ func MakeSendTx() {
 		fmt.Println("Broadcast error:", err)
 		return
 	}
-
 	fmt.Printf("Broadcast Response: %+v\n", broadcastResp)
 	fmt.Printf("Transaction Hash: %s\n", broadcastResp.TxResponse.TxHash)
-
 }
