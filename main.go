@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/cosmos/cosmos-sdk/types/bech32"
 	"math/rand"
 	"os"
 	"strings"
+
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/cosmos/cosmos-sdk/types/bech32"
+	"golang.org/x/crypto/sha3"
 
 	"cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -24,6 +27,7 @@ import (
 	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/gogoproto/proto"
+	ibctypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types" // Import the IBC transfer types
 )
 
 /*
@@ -46,7 +50,10 @@ var (
 func init() {
 	var err error
 	//connect gRpc server
-	conn, err = grpc.NewClient("192.168.0.84:19090", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	//xxx.xxx.0.248:9290  gea uat rollapp
+	//xxx.xx.0.230:9290  me uat rollapp
+	//xxx.xxx.0.230:9090 me uat hub
+	conn, err = grpc.NewClient("xxx.xxx.0.230:9290", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		panic(err)
 	}
@@ -56,7 +63,9 @@ func init() {
 func main() {
 	//decodeTx2()
 	//decodeTx()
-	MakeSendTx()
+	GenerateKeyAndAddress(false)
+	//MakeSendTx()
+	//SendTxBytes()
 	err := conn.Close()
 	if err != nil {
 		fmt.Println("Error closing connection:", err)
@@ -91,6 +100,10 @@ func decodeTx() {
 			var msg types.MsgSend
 			_ = proto.Unmarshal(anyMsg.Value, &msg)
 			fmt.Printf("MsgSend: %+v\n", msg)
+		case "/ibc.applications.transfer.v1.MsgTransfer":
+			var msg ibctypes.MsgTransfer
+			_ = proto.Unmarshal(anyMsg.Value, &msg)
+			fmt.Printf("MsgTransfer: %+v\n", msg)
 		default:
 			fmt.Printf("Unknown msg type: %s\n", anyMsg.TypeUrl)
 		}
@@ -140,7 +153,7 @@ func CallGRPCSimulate(tx *sdkTx.Tx) {
 }
 
 func decodeTx2() {
-	txs := "CosBCogBChwvY29zbW9zLmJhbmsudjFiZXRhMS5Nc2dTZW5kEmgKKW1lMTI0ejMyZ2ZwdnE3OXdycno2YXhoaGRhZmVuMHp3endqZmp4ZTI3EiltZTFyM3h1ZWhhajQ1eDBjemszM2N4ajlsa3AzamN5bWFuOHZleTUzMBoQCgR1bWVjEggyNTUwMDAwMBJoClEKRgofL2Nvc21vcy5jcnlwdG8uc2VjcDI1NmsxLlB1YktleRIjCiECBpaZ+tOtXfdMaI7WX45R3WVcwpEkfyiOdT/4K1I059kSBAoCCAEY0gISEwoNCgR1bWVjEgUxMzIzMRCgwh4aQNZ6EUbG5+5KTkVHTmPCLxhcQioywwvpDIhQqxKKJAAUfKEjuT7BPytWlAlks2IwcwTlmcs/nOKmhuowcGIUaHo="
+	txs := "CkkKRwoXL2dlYS5jaGVja2luLk1zZ0NoZWNrSW4SLAoqZ2VhMWd1N2FlN3BqcHJxcDI3amtwNTd6bmhua3A0Njc1bDR6Z3k1MHYwElgKUApGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQJyjLM3xCd5LZuDMkrobCz7yrPC8TDZrLCgOXAKBtIBUhIECgIIARgfEgQQwJoMGkDGarGU/PgZLKxeHbdnBUVVX/NnEY1DYNCSKv29z7dhXhy7J/P8bHPfhYpZxDSjyyj+dJuBWUUawWrOO8h6adxt"
 	txsBase64 := strings.Split(txs, ",")
 	for i, txBase64 := range txsBase64 {
 		txBase64 = strings.TrimPrefix(txBase64, "\n")
@@ -209,9 +222,9 @@ func GenerateKeyAndAddress(isCreate bool) (privKey *secp256k1.PrivKey, pubKey *s
 		}
 		privKey = &secp256k1.PrivKey{Key: privateKeyBytes}
 	} else {
-		//Private Key:
-		//public Key: Agr366jFJ6kpvg9/yHAmprFMAydBn0sso0fzyCfUuRLd
-		//address: me1vxekpa9gsktfdeydqn4vh3jyt7hwafpmkmfqdd
+		//Private Key: 
+		//Expected public Key: A1oc7W+hrF9Nwv/9Ed+Qs2jUMDHzciEYkdKGNWRkvPm9
+		//Expected address: me1j92wsc65k622ucnj7ux2h0cg3jjksgvs4s8rfa
 		privateKeyHex := ""
 		privKeyBytes, err := hex.DecodeString(privateKeyHex)
 		if err != nil {
@@ -220,17 +233,83 @@ func GenerateKeyAndAddress(isCreate bool) (privKey *secp256k1.PrivKey, pubKey *s
 		}
 		privKey = &secp256k1.PrivKey{Key: privKeyBytes}
 	}
+
+	// 获取公钥
 	pubKey = privKey.PubKey().(*secp256k1.PubKey)
-	addr := sdk.AccAddress(pubKey.Address())
+
+	// 调试信息：打印原始公钥字节（33字节压缩格式）
+	fmt.Printf("\n=== 密钥信息 ===\n")
+	fmt.Printf("Private Key (hex): %x\n", privKey.Key)
+	fmt.Printf("Private Key length: %d bytes\n", len(privKey.Key))
+
+	// 公钥信息
+	pubKeyBytes := pubKey.Bytes()
+	fmt.Printf("\nPublic Key (hex): %x\n", pubKeyBytes)
+	fmt.Printf("Public Key length: %d bytes\n", len(pubKeyBytes))
+	fmt.Printf("Public Key (base64): %s\n", base64.StdEncoding.EncodeToString(pubKeyBytes))
+	fmt.Printf("Public Key prefix: 0x%02x (0x02=even Y, 0x03=odd Y)\n", pubKeyBytes[0])
+	fmt.Printf("Public Key Type: /ethermint.crypto.v1.ethsecp256k1.PubKey\n")
+
+	// 方法1: Cosmos SDK 标准方式 (SHA256 + RIPEMD160)
+	pubKeyAddr := pubKey.Address()
+	fmt.Printf("\n=== Cosmos SDK 标准方式 ===\n")
+	fmt.Printf("Address (raw bytes): %x\n", pubKeyAddr)
+	fmt.Printf("Address length: %d bytes\n", len(pubKeyAddr))
+	hash := sha256.Sum256(pubKeyBytes)
+	fmt.Printf("SHA256(pubkey)[:20]: %x\n", hash[:20])
+
+	addr := sdk.AccAddress(pubKeyAddr)
 	address, err := bech32.ConvertAndEncode("me", addr)
 	if err != nil {
 		fmt.Println("Error converting address:", err)
 		return
 	}
-	fmt.Printf("Private Key: %x\n", privKey.Key)
-	fmt.Printf("public Key: %s\n", base64.StdEncoding.EncodeToString(pubKey.Bytes()))
-	fmt.Printf("address: %s\n", address)
-	return privKey, pubKey, address
+	fmt.Printf("Bech32 Address (Cosmos): %s\n", address)
+
+	// 方法2: Ethereum/Ethermint 方式 (Keccak256)
+	fmt.Printf("\n=== Ethereum/Ethermint 方式 ===\n")
+	// 需要使用未压缩的公钥 (65字节: 0x04 + 32字节X + 32字节Y)
+	// 从压缩公钥恢复未压缩公钥，然后使用 Keccak256 计算地址
+	ethAddr := calculateEthAddress(pubKeyBytes)
+	fmt.Printf("ETH Address (raw bytes): %x\n", ethAddr)
+	fmt.Printf("ETH Address length: %d bytes\n", len(ethAddr))
+
+	ethAddrBech32, err := bech32.ConvertAndEncode("me", ethAddr)
+	if err != nil {
+		fmt.Println("Error converting eth address:", err)
+		return
+	}
+	fmt.Printf("Bech32 Address (Ethermint): %s\n", ethAddrBech32)
+	fmt.Printf("Expected Address: me1j92wsc65k622ucnj7ux2h0cg3jjksgvs4s8rfa\n")
+	fmt.Printf("===================\n\n")
+
+	// 返回 Ethermint 风格的地址
+	return privKey, pubKey, ethAddrBech32
+}
+
+// calculateEthAddress 计算 Ethereum 风格的地址（Keccak256）
+func calculateEthAddress(compressedPubKey []byte) []byte {
+	// 从压缩公钥获取未压缩公钥
+	// 压缩公钥格式: 0x02/0x03 + 32字节X坐标
+	// 未压缩公钥格式: 0x04 + 32字节X + 32字节Y
+
+	// 使用 btcec 库来扩展压缩公钥
+	pubKey, err := btcec.ParsePubKey(compressedPubKey)
+	if err != nil {
+		fmt.Println("Error parsing compressed pubkey:", err)
+		return nil
+	}
+
+	// 获取未压缩公钥（去掉0x04前缀）
+	uncompressedPubKey := pubKey.SerializeUncompressed()[1:] // 跳过0x04前缀
+
+	// 计算 Keccak256 哈希
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(uncompressedPubKey)
+	fullHash := hash.Sum(nil)
+
+	// 取后20字节作为地址
+	return fullHash[12:]
 }
 func getAccountInfo(address string) (accountNumber uint64, sequence uint64, err error) {
 	authClient := authTypes.NewQueryClient(conn)
@@ -357,6 +436,30 @@ func MakeSendTx() {
 	//15. broadcast the transaction
 	broadcastResp, err := client.BroadcastTx(context.Background(), &sdkTx.BroadcastTxRequest{
 		TxBytes: txBytes,
+		Mode:    sdkTx.BroadcastMode_BROADCAST_MODE_SYNC, // or use BROADCAST_MODE_ASYNC, BROADCAST_MODE_BLOCK
+	})
+	if err != nil {
+		fmt.Println("Broadcast error:", err)
+		return
+	}
+	fmt.Printf("Broadcast Response: %+v\n", broadcastResp)
+	fmt.Printf("Transaction Hash: %s\n", broadcastResp.TxResponse.TxHash)
+}
+func SendTxBytes() {
+	// Example transaction bytes (replace with actual transaction bytes)
+	//txBytes := "CkkKRwoXL2dlYS5jaGVja2luLk1zZ0NoZWNrSW4SLAoqZ2VhMW5oenJzemtzZ3ZueGprbXJsZTl5azJuYTQ3MzZkY2RkdDU1OGM3EmQKUApGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQPGL9HIg/HJrURjCHacGTNNMipqHxQc+MSHcTtUaeUPOhIECgIIARgBEhAKCQoEdWdhZxIBMBDAlrECGkAVgMNYJPYTw3VymIAHBaNJk9JUeA+ZTqMQjdxVFNV9ax5ZzXelHBqgKkWqw9p8Dr9vA/Xt8+oClpDniVpkZjqS"
+	txBytes := "CogKCpoBCikvbWV0YWVhcnRoLndzdGFraW5nLk1zZ1dpdGhkcmF3RnJvbVJlZ2lvbhJtCiltZTFoZDV5OWhlcGprYzIyZXdhcXVsZGNqcWVsbHBuMjhrNGR4ejVhbBIDcnVzGiltZTF6N3NmM2g4cnd2dnU2OWd5bG16dGRmc3gwbDN1enRkdW01OXA0aCIQCgR1bWVjEggyMDA0MDAwMAqaAQopL21ldGFlYXJ0aC53c3Rha2luZy5Nc2dXaXRoZHJhd0Zyb21SZWdpb24SbQopbWUxaGQ1eTloZXBqa2MyMmV3YXF1bGRjanFlbGxwbjI4azRkeHo1YWwSA2FyZRopbWUxcmRjM3lmNmxkczN2MHZyM2Y2N3R1Z3hqeG04azloNTd3dnhhZ2ciEAoEdW1lYxIIODAwNDAwMDAKmgEKKS9tZXRhZWFydGgud3N0YWtpbmcuTXNnV2l0aGRyYXdGcm9tUmVnaW9uEm0KKW1lMWhkNXk5aGVwamtjMjJld2FxdWxkY2pxZWxscG4yOGs0ZHh6NWFsEgNteXMaKW1lMTU3ZndnZnJnbnE2Z3FqNTBqMmZ6cDhlY2dmcjI0MzNsMDVrN2NkIhAKBHVtZWMSCDEwMDQwMDAwCpoBCikvbWV0YWVhcnRoLndzdGFraW5nLk1zZ1dpdGhkcmF3RnJvbVJlZ2lvbhJtCiltZTFoZDV5OWhlcGprYzIyZXdhcXVsZGNqcWVsbHBuMjhrNGR4ejVhbBIDYW5kGiltZTFuZDgyN21sbjM3a3djcnVsN3gzeXdwbWs4ank3ZGhrNmE2a2o3eiIQCgR1bWVjEgg2MDA0MDAwMAqbAQopL21ldGFlYXJ0aC53c3Rha2luZy5Nc2dXaXRoZHJhd0Zyb21SZWdpb24SbgopbWUxaGQ1eTloZXBqa2MyMmV3YXF1bGRjanFlbGxwbjI4azRkeHo1YWwSA2NobhopbWUxajRqY3J3YXl4N3JmemdsenZrMzA0ODc0ZHduNTV2OWxhdHE3NHYiEQoEdW1lYxIJMTMwMDQwMDAwCpoBCikvbWV0YWVhcnRoLndzdGFraW5nLk1zZ1dpdGhkcmF3RnJvbVJlZ2lvbhJtCiltZTFoZDV5OWhlcGprYzIyZXdhcXVsZGNqcWVsbHBuMjhrNGR4ejVhbBIDdGhhGiltZTFtc3N6bHYzMDY1Z2tmY2YydDZzMzQwMDU1bW05aGZ4cXBneGhycCIQCgR1bWVjEggxMDA0MDAwMAqfAQopL21ldGFlYXJ0aC53c3Rha2luZy5Nc2dXaXRoZHJhd0Zyb21SZWdpb24ScgopbWUxaGQ1eTloZXBqa2MyMmV3YXF1bGRjanFlbGxwbjI4azRkeHo1YWwSCG1lX2VhcnRoGiltZTF2Z2ttdHNnOTZmNm56cDAwcTRsa3NjcHhwZm00bmZ4eXFuczd5eCIQCgR1bWVjEgg2MDA0MDAwMAqaAQopL21ldGFlYXJ0aC53c3Rha2luZy5Nc2dXaXRoZHJhd0Zyb21SZWdpb24SbQopbWUxaGQ1eTloZXBqa2MyMmV3YXF1bGRjanFlbGxwbjI4azRkeHo1YWwSA2F1cxopbWUxeTY4OW56aHc4djU0OXR6NmpjdTNnc3dzZ2Y0ZTZ2OXB0cTNzbDgiEAoEdW1lYxIIMTAwNDAwMDASGENvbW11bml0eSBHcm93dGggUmV3YXJkcxLVBArLBAqoBAopL2Nvc21vcy5jcnlwdG8ubXVsdGlzaWcuTGVnYWN5QW1pbm9QdWJLZXkS+gMIAxJGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQIKS0HHqkfgTJ7lmNcogtlDTCohmfArtb46oaanHp5YeBJGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQOVqXiO3NzDbYI/MUXnoDyjlQG/CChcRxXGg7Iblm86JBJGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQNxGuXFf3CIOrztn/fnwQ/mGdUTs2ia5EugCxGBnZ7wGhJGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQNEzCzl4xJJe5GQ70BMFAeBM+Zu200Wx+ZoE2fA4cm+UBJGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQOgkrTA+QrmotXx6QmQiKMuymkOMrmUUazbaIyY9Iz9uxJGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQKHHsZ+eVZfJrhAw76u5PKJm/pZZGvt4XX/Nt+DcEnXvRJGCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQMWSMuOfMKmrdJXnbgA1B9dmjGg/X8K3WuwY2pRhqTDwBIbEhkKBQgHEgGUEgQKAgh/EgQKAgh/EgQKAgh/GN4DEgUQgJL0ARrGAQpAmxN6M9nCUgQlalqwS1bKoFaLll018UI+ehD1Ido7Gu9Q1cBXGOKBSGOHCWkhQlBEuGG6LMoLQMHa4m3YG3Ay5wpADXtf3HEom0bQXY+iw2jHhN1fDavVHRdzQ8ILAeIcNK0+GouC2Vmam2eYT8evrrqGLOCDxc1qKE/Q+kHl/UJWogpAydKC4iCR4lnNcPYD+PgBuC54370HN4w1mgk82IwD8rM0cyss0319GiRVDhD/J35TMMHdu/P8ZjMe/omuLiw3xA=="
+	txBytesDecoded, err := base64.StdEncoding.DecodeString(txBytes)
+	if err != nil {
+		fmt.Println("Error decoding transaction bytes:", err)
+		return
+	}
+	fmt.Println("Decoded Transaction Bytes:", txBytesDecoded)
+	// Call the gRPC Simulate method with the decoded transaction bytes
+	//CallGRPCSimulate(&sdkTx.Tx{Body: &sdkTx.TxBody{Messages: []*codectypes.Any{{TypeUrl: "/cosmos.bank.v1beta1.MsgSend", Value: txBytesDecoded}}}})
+
+	broadcastResp, err := client.BroadcastTx(context.Background(), &sdkTx.BroadcastTxRequest{
+		TxBytes: txBytesDecoded,
 		Mode:    sdkTx.BroadcastMode_BROADCAST_MODE_SYNC, // or use BROADCAST_MODE_ASYNC, BROADCAST_MODE_BLOCK
 	})
 	if err != nil {
