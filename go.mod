@@ -6,9 +6,11 @@ toolchain go1.24.3
 
 require (
 	cosmossdk.io/math v1.5.3
+	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/cosmos/cosmos-sdk v0.53.2
 	github.com/cosmos/gogoproto v1.7.0
 	github.com/cosmos/ibc-go/v10 v10.3.0
+	golang.org/x/crypto v0.44.0
 	google.golang.org/grpc v1.72.2
 )
 
@@ -31,7 +33,6 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/speakeasy v0.2.0 // indirect
-	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
 	github.com/bytedance/sonic v1.13.2 // indirect
 	github.com/bytedance/sonic/loader v0.2.4 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -147,7 +148,6 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.15.0 // indirect
-	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
